@@ -1,0 +1,100 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>MapCut 3D</title>
+<link href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
+<style>
+:root{--bg:#0b1411;--pn:#12211b;--tx:#e8f3ec;--mu:#8aa396;--ac:#c6ff3d;--bd:#24392f}
+html,body{margin:0;height:100%;overflow:hidden;background:#000;color:var(--tx);font:15px system-ui,sans-serif}
+#map{position:fixed;inset:0}
+.bar{position:fixed;left:0;right:0;bottom:0;z-index:5;display:flex;gap:8px;align-items:center;padding:8px 12px calc(8px + env(safe-area-inset-bottom,0px));background:var(--pn)}
+.bar input[type=range]{flex:1}
+.sh{position:fixed;left:0;right:0;bottom:calc(60px + env(safe-area-inset-bottom,0px));z-index:6;max-height:0;overflow:hidden;background:var(--bg);border-radius:14px 14px 0 0;transition:max-height .25s}
+.sh.open{max-height:58dvh;overflow:auto;padding:10px;box-shadow:0 -6px 20px #0008}
+.hd{position:fixed;right:10px;bottom:calc(72px + env(safe-area-inset-bottom,0px));z-index:7;background:var(--ac);color:#06130c;font-weight:700;border-radius:20px;padding:10px 16px;border:0}
+.p{background:var(--pn);border:1px solid var(--bd);border-radius:12px;padding:10px;display:grid;gap:8px;margin-bottom:10px}
+.r{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+h2{font-size:12px;margin:0;color:var(--mu);letter-spacing:.08em;text-transform:uppercase}
+input,select,button{font:inherit;color:var(--tx);background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:6px 8px;min-height:40px}
+input[type=number]{width:64px}input[type=color]{padding:0;width:40px}input[type=range]{padding:0;min-width:90px}
+button.a{background:var(--ac);color:#06130c;font-weight:700;border-color:var(--ac)}
+.k{font-size:12px;color:var(--mu)}video{display:none;width:100%;max-width:240px;border-radius:8px}
+</style></head><body>
+<div id="map"></div>
+<div class="bar"><button class="a" id="pl">▶</button><input type="range" id="ts" min="0" max="8" step=".01" value="0"><span id="tl" class="k">0.0s</span></div>
+<button class="hd" id="hd">▲ Ajustes</button>
+<div class="sh" id="sh">
+<div class="p"><h2>Buscar país</h2><input id="sc" list="dl" placeholder="Escribe: Brasil, México, Japón…"><datalist id="dl"></datalist><div class="k" id="ws">Cargando países…</div><div class="k">También puedes tocar cualquier país en el mapa. Dos dedos hacia arriba/abajo inclinan la vista.</div></div>
+<div class="p"><h2>País: <b id="cn">ninguno</b></h2>
+<div class="r"><select data-k="mode"><option value="flag">Bandera</option><option value="solid">Color sólido</option></select><label>Relleno <input type="color" data-k="col"></label><label>Borde <input type="color" data-k="oc"></label></div>
+<input data-k="txt" placeholder="Texto sobre el país (opcional)">
+<div class="r"><label>Giro bandera <input type="range" data-k="rot" min="-45" max="45" step="1"></label></div>
+<div class="r"><label>Inicio <input type="number" data-k="s" step=".1" min="0"> s</label><label>Dura <input type="number" data-k="d" step=".1" min=".2"> s</label><button id="rm">Quitar</button></div></div>
+<div class="p"><h2>Cámara 3D</h2>
+<div class="r"><label>Inclinación <input type="range" id="pi" min="0" max="80" value="55"></label></div>
+<div class="r"><label>Relieve <input type="range" id="ex" min="0" max="4" step=".1" value="1.8"></label></div>
+<div class="r"><button id="kf">+ Keyframe aquí</button><label>Duración <input type="number" id="du" value="8" min="1" max="60"> s</label></div><div id="kl" class="r"></div></div>
+<div class="p"><h2>Exportar</h2><div class="r"><button class="a" id="bx">Grabar video</button><span id="xs" class="k"></span></div><video id="pv" controls playsinline></video><a id="dw" download="mapa.webm" style="display:none;color:var(--ac)">Descargar video</a></div>
+</div>
+<script>
+const $=i=>document.getElementById(i),cl=(v,a,b)=>Math.min(b,Math.max(a,v)),ease=u=>u*u*(3-2*u);
+const GJ='https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@v5.1.2/geojson/ne_50m_admin_0_countries.geojson';
+const EC=['h',[['#fcd116',2],['#003893',1],['#ce1126',1]]];
+const FS={COL:EC,ECU:EC,PER:['v',[['#d91023',1],['#fff',1],['#d91023',1]]],VEN:['h',[['#fcd116',1],['#00247d',1],['#cf142b',1]]],BRA:['h',[['#009c3b',1]]],ARG:['h',[['#74acdf',1],['#fff',1],['#74acdf',1]]],MEX:['v',[['#006847',1],['#fff',1],['#ce1126',1]]],BOL:['h',[['#d52b1e',1],['#f9e300',1],['#007934',1]]],FRA:['v',[['#0055a4',1],['#fff',1],['#ef4135',1]]],DEU:['h',[['#000',1],['#dd0000',1],['#ffce00',1]]],ITA:['v',[['#009246',1],['#fff',1],['#ce2b37',1]]],ESP:['h',[['#aa151b',1],['#f1bf00',2],['#aa151b',1]]],RUS:['h',[['#fff',1],['#0039a6',1],['#d52b1e',1]]],UKR:['h',[['#0057b7',1],['#ffd700',1]]],POL:['h',[['#fff',1],['#dc143c',1]]],NLD:['h',[['#ae1c28',1],['#fff',1],['#21468b',1]]],BEL:['v',[['#000',1],['#fdda24',1],['#ef3340',1]]],ROU:['v',[['#002b7f',1],['#fcd116',1],['#ce1126',1]]],PRY:['h',[['#d52b1e',1],['#fff',1],['#0038a8',1]]],IRL:['v',[['#169b62',1],['#fff',1],['#ff883e',1]]],PAN:['h',[['#fff',1],['#da121a',1]]],CHL:['h',[['#fff',1],['#d52b1e',1]]],IND:['h',[['#ff9933',1],['#fff',1],['#138808',1]]],CHN:['h',[['#de2910',1]]],JPN:['h',[['#fff',1]]],NGA:['v',[['#008751',1],['#fff',1],['#008751',1]]]};
+const t0=8;let feats={},S={},M={},t=0,dur=t0,play=false,edit=false,rec=null,cur=null,ready=false,lt=-1;
+let kf=[{t:0,center:[-77,8.5],zoom:4.3,pitch:50,bearing:0},{t:t0,center:[-73.5,4.2],zoom:5.7,pitch:62,bearing:-14}];
+const map=new maplibregl.Map({container:'map',style:{version:8,glyphs:'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
+sources:{sat:{type:'raster',tiles:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],tileSize:256,maxzoom:18,attribution:'Imágenes © Esri, Maxar, Earthstar Geographics'},
+dem:{type:'raster-dem',tiles:['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],encoding:'terrarium',tileSize:256,maxzoom:12}},
+layers:[{id:'sat',type:'raster',source:'sat'},{id:'hs',type:'hillshade',source:'dem',paint:{'hillshade-exaggeration':.45,'hillshade-shadow-color':'#0a1a10'}}],
+terrain:{source:'dem',exaggeration:1.8}},center:kf[0].center,zoom:kf[0].zoom,pitch:kf[0].pitch,maxPitch:80,preserveDrawingBuffer:true,canvasContextAttributes:{preserveDrawingBuffer:true}});
+function camAt(){const k=[...kf].sort((a,b)=>a.t-b.t),L=k[k.length-1];if(t<=k[0].t)return k[0];if(t>=L.t)return L;let i=0;while(k[i+1].t<=t)i++;const a=k[i],b=k[i+1],u=ease((t-a.t)/(b.t-a.t)),m=(x,y)=>x+(y-x)*u;
+return{center:[m(a.center[0],b.center[0]),m(a.center[1],b.center[1])],zoom:m(a.zoom,b.zoom),pitch:m(a.pitch,b.pitch),bearing:m(a.bearing,b.bearing)}}
+function stripes(f,[d,cs],rot){const b=turf.bbox(f),c=[(b[0]+b[2])/2,(b[1]+b[3])/2],w=b[2]-b[0],h=b[3]-b[1],pd=Math.max(w,h),T=cs.reduce((q,x)=>q+x[1],0),out=[];let o=0;
+cs.forEach(([col,wt],i)=>{const l=wt/T,la=i==cs.length-1;let x0,x1,y0,y1;
+if(d=='h'){x0=b[0]-pd;x1=b[2]+pd;y1=b[3]-o*h+(i?0:pd);y0=b[3]-(o+l)*h-(la?pd:0)}else{y0=b[1]-pd;y1=b[3]+pd;x0=b[0]+o*w-(i?0:pd);x1=b[0]+(o+l)*w+(la?pd:0)}
+let q=turf.polygon([[[x0,y0],[x1,y0],[x1,y1],[x0,y1],[x0,y0]]]);if(+rot)q=turf.transformRotate(q,+rot,{pivot:c});
+let r=null;try{r=turf.intersect(f,q)}catch(e){}if(r){r.properties={c:col};out.push(r)}o+=l});return out}
+function grad(c,po){const P=['interpolate',['linear'],['line-progress']],z='rgba(0,0,0,0)';return po<=0?[...P,0,z,1,z]:po>=.999?[...P,0,c,1,c]:[...P,0,c,po,c,po+.0005,z,1,z]}
+function rebuild(c){const f=feats[c],s=S[c];let fc=s.mode=='flag'&&FS[c]?stripes(f,FS[c],s.rot):[];if(!fc.length)fc=[{type:'Feature',geometry:f.geometry,properties:{c:s.col}}];
+map.getSource('f_'+c).setData({type:'FeatureCollection',features:fc});M[c]=0}
+function addC(c){const f=feats[c],s=S[c],g=f.geometry,pl=g.type=='Polygon'?[g.coordinates]:g.coordinates,rs=pl.map(q=>q[0]).sort((a,b)=>b.length-a.length),lp={'line-cap':'round','line-join':'round'};
+map.addSource('f_'+c,{type:'geojson',data:{type:'FeatureCollection',features:[]}});map.addLayer({id:'f_'+c,type:'fill',source:'f_'+c,paint:{'fill-color':['get','c'],'fill-opacity':0}});
+map.addSource('o_'+c,{type:'geojson',lineMetrics:true,data:{type:'Feature',geometry:{type:'LineString',coordinates:rs[0]}}});
+map.addLayer({id:'og_'+c,type:'line',source:'o_'+c,layout:lp,paint:{'line-width':9,'line-blur':7,'line-opacity':.4,'line-gradient':grad('#fff',0)}});
+map.addLayer({id:'ol_'+c,type:'line',source:'o_'+c,layout:lp,paint:{'line-width':2.5,'line-gradient':grad('#fff',0)}});
+if(rs.length>1){map.addSource('oi_'+c,{type:'geojson',data:{type:'Feature',geometry:{type:'MultiLineString',coordinates:rs.slice(1)}}});map.addLayer({id:'oi_'+c,type:'line',source:'oi_'+c,paint:{'line-width':2,'line-color':s.oc,'line-opacity':0}})}
+map.addSource('l_'+c,{type:'geojson',data:turf.centerOfMass(f)});
+map.addLayer({id:'l_'+c,type:'symbol',source:'l_'+c,layout:{'text-field':s.txt,'text-font':['Open Sans Regular','Arial Unicode MS Regular'],'text-size':30,'text-allow-overlap':true},paint:{'text-color':'#fff','text-halo-color':'#000','text-halo-width':2,'text-opacity':0}});
+rebuild(c)}
+function rmC(c){['f_','og_','ol_','oi_','l_'].forEach(p=>map.getLayer(p+c)&&map.removeLayer(p+c));['f_','o_','oi_','l_'].forEach(p=>map.getSource(p+c)&&map.removeSource(p+c));delete S[c];delete M[c]}
+function pick(c,fly){cur=c;if(!S[c]){S[c]={mode:FS[c]?'flag':'solid',col:'#ffd23f',oc:'#ffffff',txt:'',rot:c=='COL'?14:0,s:+t.toFixed(1),d:2.5};addC(c)}
+if(fly){edit=true;map.fitBounds(turf.bbox(feats[c]),{padding:40,pitch:55,duration:1500})}ui()}
+function ui(){const s=S[cur];$('cn').textContent=cur?feats[cur].properties.n:'ninguno';document.querySelectorAll('[data-k]').forEach(e=>{e.disabled=!s;if(s)e.value=s[e.dataset.k]});
+$('kl').innerHTML=[...kf].sort((a,b)=>a.t-b.t).map(k=>`<span><button data-t="${k.t}">${k.t.toFixed(1)}s</button><button data-d="${k.t}">✕</button></span>`).join('')||'<span class="k">Sin keyframes: cámara libre.</span>'}
+function upd(){for(const c in S){const s=S[c],p=cl((t-s.s)/s.d,0,1),po=cl(p/.6,0,1),fo=cl((p-.5)*2,0,1),k=[po,fo,s.oc].join();if(M[c]===k)continue;M[c]=k;
+const g=grad(s.oc,po);map.setPaintProperty('ol_'+c,'line-gradient',g);map.setPaintProperty('og_'+c,'line-gradient',g);map.setPaintProperty('f_'+c,'fill-opacity',.88*ease(fo));
+if(map.getLayer('oi_'+c)){map.setPaintProperty('oi_'+c,'line-opacity',po>=1?1:0);map.setPaintProperty('oi_'+c,'line-color',s.oc)}map.setPaintProperty('l_'+c,'text-opacity',cl((p-.8)*5,0,1))}}
+map.on('load',async()=>{let g;try{g=await(await fetch(GJ)).json()}catch(e){$('ws').textContent='No se pudo cargar la lista de países (revisa tu conexión)';return}
+g.features.forEach(f=>{const p=f.properties;if(p.ADM0_A3=='ATA')return;f.properties={c:p.ADM0_A3,n:p.NAME_ES||p.NAME};feats[p.ADM0_A3]=f});
+map.addSource('all',{type:'geojson',data:{type:'FeatureCollection',features:Object.values(feats)}});map.addLayer({id:'cf',type:'fill',source:'all',paint:{'fill-color':'#000','fill-opacity':.01}});
+$('dl').innerHTML=Object.values(feats).map(f=>`<option value="${f.properties.n}">`).join('');$('ws').textContent='Países cargados: '+Object.keys(feats).length;
+map.on('click',e=>{const q=map.queryRenderedFeatures(e.point,{layers:['cf']});if(q[0])pick(q[0].properties.c)});ready=true;pick('COL')});
+map.on('movestart',e=>{if(e.originalEvent)edit=true});
+$('sc').onchange=e=>{const f=Object.values(feats).find(f=>f.properties.n.toLowerCase()==e.target.value.toLowerCase());if(f){pick(f.properties.c,true);e.target.value=''}};
+document.querySelectorAll('[data-k]').forEach(e=>e.addEventListener(e.dataset.k=='rot'?'change':'input',()=>{const s=S[cur];if(!s)return;const k=e.dataset.k;s[k]=['number','range'].includes(e.type)?+e.value:e.value;if(['mode','col','rot'].includes(k))rebuild(cur);if(k=='txt')map.setLayoutProperty('l_'+cur,'text-field',s.txt);M[cur]=0}));
+$('rm').onclick=()=>{if(S[cur]){rmC(cur);cur=null;ui()}};
+$('kl').onclick=e=>{const b=e.target;if(b.dataset.t){t=+b.dataset.t;edit=false;lt=-1}if(b.dataset.d)kf=kf.filter(k=>k.t!=+b.dataset.d);ui()};
+$('kf').onclick=()=>{const c=map.getCenter();kf=kf.filter(k=>Math.abs(k.t-t)>.05);kf.push({t:+t.toFixed(2),center:[c.lng,c.lat],zoom:map.getZoom(),pitch:map.getPitch(),bearing:map.getBearing()});ui()};
+$('pi').oninput=e=>{edit=true;map.setPitch(+e.target.value)};
+$('ex').oninput=e=>map.setTerrain({source:'dem',exaggeration:+e.target.value});
+$('du').onchange=e=>{dur=cl(+e.target.value,1,60);$('ts').max=dur;t=Math.min(t,dur)};
+$('pl').onclick=()=>{if(t>=dur)t=0;edit=false;lt=-1;play=!play};
+$('ts').oninput=e=>{t=+e.target.value;edit=false;play=false};
+$('hd').onclick=()=>{const s=$('sh').classList.toggle('open');$('hd').textContent=s?'▼ Cerrar':'▲ Ajustes'};
+$('bx').onclick=()=>{try{const ty=['video/webm;codecs=vp9','video/webm','video/mp4'].find(m=>MediaRecorder.isTypeSupported(m)),ch=[];rec=new MediaRecorder(map.getCanvas().captureStream(30),ty?{mimeType:ty,videoBitsPerSecond:8e6}:{});
+rec.ondataavailable=e=>ch.push(e.data);rec.onstop=()=>{const u=URL.createObjectURL(new Blob(ch,{type:rec.mimeType}));$('pv').src=u;$('pv').style.display='block';$('dw').href=u;$('dw').style.display='inline';rec=null;$('xs').textContent='Listo'};
+$('sh').classList.remove('open');$('hd').textContent='▲ Ajustes';t=0;edit=false;lt=-1;play=true;rec.start();$('xs').textContent='Grabando…'}catch(e){$('xs').textContent='Tu navegador no puede grabar'}};
+let last=0;(function lp(n){const dt=Math.min(.1,(n-last)/1000);last=n;if(play){t+=dt;if(t>=dur){t=dur;play=false;if(rec&&rec.state!='inactive')rec.stop()}}
+if(!edit&&kf.length>1&&(play||t!=lt)){map.jumpTo(camAt());lt=t}
+$('pl').textContent=play?'❚❚':'▶';$('ts').value=t;$('tl').textContent=t.toFixed(1)+'s';if(ready)upd();requestAnimationFrame(lp)})(0);
+</script></body></html>
